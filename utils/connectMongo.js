@@ -6,7 +6,7 @@ module.exports = function connectDB() {
   try {
     mongoose.connect(url);
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
     process.exit(1);
   }
 

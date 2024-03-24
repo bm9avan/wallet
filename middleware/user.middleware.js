@@ -8,7 +8,7 @@ exports.currentUser = (req, res, next) => {
         token.replace("Bearer ", ""),
         process.env.JWT_SECRET
       );
-      req.user = JSON.stringify(user);
+      req.user = user;
       return next();
     } catch (error) {
       return res.status(500).json({ error: "Error while decodeing Token" });

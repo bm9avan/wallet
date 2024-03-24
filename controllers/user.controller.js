@@ -1,6 +1,8 @@
 const jwt = require("jsonwebtoken");
 const user = require("../models/user.model");
 const { z } = require("zod");
+const { accountModel } = require("../models/account.model");
+const { transactionModel } = require("../models/transaction.model");
 
 userZodSignup = z.object({
   name: z.string({
@@ -28,13 +30,44 @@ userZodString = z.string({ message: "Invalid string" });
 
 exports.signup = async (req, res) => {
   const zodUser = userZodSignup.safeParse(req.body);
+  const ref = req.query.ref;
   if (!zodUser.success) {
     res
       .status(408)
       .json({ error: zodUser.error.issues.map((e) => e.message).join(", ") });
   } else {
     try {
-      const result = await user.userModel.create(zodUser.data);
+      let result;
+      const refUser = ref ? await user.userModel.findById(ref) : null;
+      if (refUser) {
+        result = await user.userModel.create({ ...zodUser.data, ref });
+      } else {
+        result = await user.userModel.create(zodUser.data);
+      }
+      await accountModel.create({
+        userId: result._id,
+      });
+      await transactionModel.create({
+        fromId: process.env.ADMIN_ACC_ID,
+        toId: result._id,
+        amount: 200,
+        message: "Signup bonus",
+      });
+      if (refUser) {
+        await transactionModel.create({
+          fromId: process.env.ADMIN_ACC_ID,
+          toId: result._id,
+          amount: 200,
+          message: `referral bonus (You Singed up from ${refUser.name}'s referral)`,
+        });
+        ref !== process.env.ADMIN_ACC_ID &&
+          (await transactionModel.create({
+            fromId: process.env.ADMIN_ACC_ID,
+            toId: ref,
+            amount: 200,
+            message: `referral bonus (${result.name} Singed up from your referral)`,
+          }));
+      }
       const token = jwt.sign(
         { _id: result._id, name: result.name, email: result.email },
         process.env.JWT_SECRET
@@ -83,7 +116,7 @@ exports.update = async (req, res) => {
   } else {
     try {
       const userResult = await user.userModel.findOne({
-        email: JSON.parse(req.user).email,
+        email: req.user.email,
       });
       userResult.name = zodUser.data;
       await userResult.save({ validateBeforeSave: false });
@@ -95,25 +128,25 @@ exports.update = async (req, res) => {
 };
 
 exports.updatePassword = async (req, res) => {
-  const zodUser = userZodLogin.safeParse(req.body);
-  const zodpassword = userZodString.safeParse(req.body.oldpassword);
-  if (!zodUser.success || !zodpassword.success) {
+  const zodNewPassword = userZodString.safeParse(req.body.newPassword);
+  const zodCurPassword = userZodString.safeParse(req.body.currentPassword);
+  if (!zodNewPassword.success || !zodCurPassword.success) {
     res.status(408).json({
       error:
-        zodUser.error?.issues.map((e) => e.message).join(", ") +
+        zodNewPassword.error?.issues.map((e) => e.message).join(", ") +
         " " +
-        zodpassword.error?.issues.map((e) => e.message).join(", "),
+        zodCurPassword.error?.issues.map((e) => e.message).join(", "),
     });
   } else {
     try {
       const userResult = await user.userModel.findOne({
-        email: zodUser.data.email,
+        email: req.user.email,
       });
       const passwordcorrect = await userResult.isPasswordCorrect(
-        zodpassword.data
+        zodCurPassword.data
       );
       if (passwordcorrect) {
-        userResult.password = zodUser.data.password;
+        userResult.password = zodNewPassword.data;
         await userResult.save({ validateBeforeSave: false });
         res.json({ success: "Password updated successfully" });
       } else {
